@@ -384,5 +384,40 @@ if __name__ == "__main__":
     tw_msg += "💥 <b>【策略七】低檔爆量股 (半年位階 ≤ 30% × 成交量 ≥ 2.5倍5日均量 × 紅K)</b>\n"
     tw_msg += "↳ " + (", ".join(strat7_matches) if strat7_matches else "熱門標的中無符合標的。 💤") + "\n"
 
-    send_telegram_message(tw_msg)
-    print("✅ 熱門排行多策略綜合報告發送完畢！")
+    [object Object], ,[object Object],(,[object Object],):
+    bot_token = os.environ.get(,[object Object],)
+    chat_id = os.environ.get(,[object Object],)
+    
+    def send_telegram_message(message):
+    bot_token = os.environ.get("TG_BOT_TOKEN")
+    chat_id = os.environ.get("TG_CHAT_ID")
+    
+    if not bot_token or not chat_id:
+        print("⚠️ 未設定 TG_BOT_TOKEN 或 TG_CHAT_ID 環境變數。")
+        return
+
+    if not message or not message.strip():
+        message = "📊 今日無符合策略之篩選標的。"
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+
+    # Telegram 單條訊息上限為 4096 字，建議以 3500 字為單位切分
+    max_length = 3500
+    chunks = [message[i:i + max_length] for i in range(0, len(message), max_length)]
+
+    for idx, chunk in enumerate(chunks):
+        payload = {
+            "chat_id": chat_id,
+            "text": chunk,
+            # 如果文字內包含 * _ [ ] 等符號，取消 parse_mode 可以避開 400 語法解析錯誤
+            # "parse_mode": "Markdown" 
+        }
+        try:
+            res = requests.post(url, json=payload, timeout=10)
+            if res.status_code == 200:
+                print(f"📢 TG 訊息發送成功！({idx + 1}/{len(chunks)})")
+            else:
+                # 印出詳細錯誤訊息以利除錯
+                print(f"📢 TG 發送失敗: HTTP {res.status_code} - {res.text}")
+        except Exception as e:
+            print(f"❌ 發送 Telegram 訊息時發生異常: {e}")
