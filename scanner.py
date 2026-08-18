@@ -252,25 +252,54 @@ def check_low_position_volume_surge(df_daily):
         pass
     return False
 
+import html
+
 # ==============================================================================
-# 💬 Telegram 發送
+# 💬 Telegram 發送（自動防護 400 錯誤：字數分段 + HTML 轉義）
 # ==============================================================================
-def send_telegram_message(message):
+def send_telegram_message(message, max_length=3500):
     bot_token = os.environ.get("TG_BOT_TOKEN")
     chat_id = os.environ.get("TG_CHAT_ID")
-    if not bot_token or not chat_id: return
+    if not bot_token or not chat_id:
+        print("⚠️ 未設定 TG_BOT_TOKEN 或 TG_CHAT_ID，跳過發送。")
+        return
     
     bot_token = str(bot_token).strip()
     chat_id = str(chat_id).strip()
-    if bot_token.lower().startswith("bot"): bot_token = bot_token[3:]
+    if bot_token.lower().startswith("bot"):
+        bot_token = bot_token[3:]
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
-    try:
-        res = requests.post(url, json=payload, timeout=10)
-        print(f"📢 TG 發送反饋: 狀態碼 {res.status_code}")
-    except Exception as e: 
-        print(f"❌ Telegram 發送異常: {e}")
+
+    # 若訊息長度超出限制，按行自動拆分為多封發送
+    lines = message.split("\n")
+    chunks = []
+    current_chunk = ""
+
+    for line in lines:
+        if len(current_chunk) + len(line) + 1 > max_length:
+            chunks.append(current_chunk)
+            current_chunk = line + "\n"
+        else:
+            current_chunk += line + "\n"
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    for idx, chunk in enumerate(chunks):
+        payload = {
+            "chat_id": chat_id,
+            "text": chunk,
+            "parse_mode": "HTML"
+        }
+        try:
+            res = requests.post(url, json=payload, timeout=10)
+            if res.status_code == 200:
+                print(f"📢 TG 發送成功 ({idx+1}/{len(chunks)})")
+            else:
+                print(f"❌ TG 發送失敗 ({idx+1}/{len(chunks)}), 狀態碼: {res.status_code}, 內文: {res.text}")
+        except Exception as e:
+            print(f"❌ Telegram 發送異常: {e}")
+        time.sleep(0.5) # 避免觸發 TG 發送頻率限制
 
 # ==============================================================================
 # 🚀 主程式
