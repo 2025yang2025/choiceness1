@@ -3,6 +3,7 @@ import yfinance as yf
 import requests
 import os
 import time
+import html
 
 # ==============================================================================
 # 🇹🇼 台股熱門排行模組 (依當日成交量排序，擷取 Top N 熱門股)
@@ -59,6 +60,10 @@ def fetch_popular_taiwan_tickers(top_n=100):
             
     return popular_tickers
 
+# ==============================================================================
+# 📊 技術指標計算模組
+# ==============================================================================
+
 def calculate_macd(close_series, fast=12, slow=26, signal=9):
     fast_ema = close_series.ewm(span=fast, adjust=False).mean()
     slow_ema = close_series.ewm(span=slow, adjust=False).mean()
@@ -72,8 +77,10 @@ def calculate_kd(df_single, n=9, m1=3, m2=3):
     high_max = df_single['High'].astype(float).rolling(window=n).max()
     close = df_single['Close'].astype(float)
     
-    rsv = ((close - low_min) / (high_max - low_min)) * 100
-    rsv = rsv.fillna(50)
+    denom = high_max - low_min
+    denom = denom.replace(0, pd.NA) # 防範除以 0
+    rsv = ((close - low_min) / denom) * 100
+    rsv = rsv.fillna(50).astype(float)
     
     k_list, d_list = [50.0], [50.0]
     for i in range(1, len(rsv)):
@@ -88,6 +95,8 @@ def calculate_rsi(close_series, period=6):
     delta = close_series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    
+    loss = loss.replace(0, pd.NA) # 防範除以 0
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     return rsi.fillna(50)
@@ -100,7 +109,9 @@ def check_macd_up_and_kd_gold(df_single):
     """ 通用模組：MACD 往 0 軸向上 + KD 黃金交叉 """
     try:
         if df_single.empty or len(df_single) < 26: return False
-        c = df_single['Close'].squeeze().astype(float)
+        c = df_single['Close'].squeeze()
+        if isinstance(c, pd.DataFrame): c = c.iloc[:, 0]
+        c = c.astype(float)
         
         macd_line, signal_line, hist = calculate_macd(c)
         if len(macd_line) < 2: return False
@@ -114,33 +125,18 @@ def check_macd_up_and_kd_gold(df_single):
         
         kd_gold = (k_ser.iloc[-1] > d_ser.iloc[-1]) and (k_ser.iloc[-2] <= d_ser.iloc[-2])
         
-        return macd_up and kd_gold
+        return bool(macd_up and kd_gold)
     except Exception:
         return False
 
 def check_strat1_resonance(df_30m, df_60m):
-    """ 策略一：30分K & 60分K 共振 (MACD 往0軸向上 + KD金叉) """
-    try:
-        return check_macd_up_and_kd_gold(df_30m) and check_macd_up_and_kd_gold(df_60m)
-    except Exception:
-        pass
-    return False
+    return check_macd_up_and_kd_gold(df_30m) and check_macd_up_and_kd_gold(df_60m)
 
 def check_strat2_resonance(df_60m, df_daily):
-    """ 策略二：60分K & 日K 共振 (MACD 往0軸向上 + KD金叉) """
-    try:
-        return check_macd_up_and_kd_gold(df_60m) and check_macd_up_and_kd_gold(df_daily)
-    except Exception:
-        pass
-    return False
+    return check_macd_up_and_kd_gold(df_60m) and check_macd_up_and_kd_gold(df_daily)
 
 def check_strat3_resonance(df_daily, df_weekly):
-    """ 策略三：日K & 週K 共振 (MACD 往0軸向上 + KD金叉) """
-    try:
-        return check_macd_up_and_kd_gold(df_daily) and check_macd_up_and_kd_gold(df_weekly)
-    except Exception:
-        pass
-    return False
+    return check_macd_up_and_kd_gold(df_daily) and check_macd_up_and_kd_gold(df_weekly)
 
 def check_volume_breakout(df_daily):
     """ 策略四：關鍵均線多頭突破 × 量能倍增 (帶量突破) """
@@ -252,10 +248,8 @@ def check_low_position_volume_surge(df_daily):
         pass
     return False
 
-import html
-
 # ==============================================================================
-# 💬 Telegram 發送（自動防護 400 錯誤：字數分段 + HTML 轉義）
+# 💬 Telegram 發送模組
 # ==============================================================================
 def send_telegram_message(message, max_length=3500):
     bot_token = os.environ.get("TG_BOT_TOKEN")
@@ -271,7 +265,6 @@ def send_telegram_message(message, max_length=3500):
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
-    # 若訊息長度超出限制，按行自動拆分為多封發送
     lines = message.split("\n")
     chunks = []
     current_chunk = ""
@@ -299,7 +292,7 @@ def send_telegram_message(message, max_length=3500):
                 print(f"❌ TG 發送失敗 ({idx+1}/{len(chunks)}), 狀態碼: {res.status_code}, 內文: {res.text}")
         except Exception as e:
             print(f"❌ Telegram 發送異常: {e}")
-        time.sleep(0.5) # 避免觸發 TG 發送頻率限制
+        time.sleep(0.5)
 
 # ==============================================================================
 # 🚀 主程式
@@ -310,7 +303,6 @@ if __name__ == "__main__":
 
     print("🚀 啟動【台股熱門排行 Top 100 策略篩選報告】...")
     
-    # 取當日成交量前 100 檔熱門標的
     popular_scan_pool = fetch_popular_taiwan_tickers(top_n=100)
     
     if not popular_scan_pool:
@@ -328,67 +320,63 @@ if __name__ == "__main__":
     print("⏳ 記憶體內多維策略流檢測中...")
     for ticker in popular_scan_pool:
         try:
-            if len(popular_scan_pool) == 1:
-                df_d = full_df_daily.copy()
-                df_m30 = full_df_30m.copy()
-                df_m60 = full_df_60m.copy()
-                df_w = full_df_weekly.copy()
-            else:
-                if ticker not in full_df_daily.columns.levels[1]: continue
-                if ticker not in full_df_30m.columns.levels[1]: continue
-                if ticker not in full_df_60m.columns.levels[1]: continue
-                if ticker not in full_df_weekly.columns.levels[1]: continue
+            # 安全擷取特定 Ticker DataFrame 邏輯
+            def get_ticker_df(full_df, ticker):
+                if isinstance(full_df.columns, pd.MultiIndex):
+                    if ticker in full_df.columns.get_level_values(1):
+                        return full_df.xs(ticker, axis=1, level=1)
+                    elif ticker in full_df.columns.get_level_values(0):
+                        return full_df.xs(ticker, axis=1, level=0)
+                return full_df
 
-                df_d = full_df_daily.xs(ticker, axis=1, level=1)
-                df_m30 = full_df_30m.xs(ticker, axis=1, level=1)
-                df_m60 = full_df_60m.xs(ticker, axis=1, level=1)
-                df_w = full_df_weekly.xs(ticker, axis=1, level=1)
+            df_d = get_ticker_df(full_df_daily, ticker)
+            df_m30 = get_ticker_df(full_df_30m, ticker)
+            df_m60 = get_ticker_df(full_df_60m, ticker)
+            df_w = get_ticker_df(full_df_weekly, ticker)
 
             if df_d.empty or df_m30.empty or df_m60.empty or df_w.empty: 
                 continue
 
-            name_zh = DYNAMIC_STOCK_NAMES.get(ticker, "")
+            name_zh = html.escape(DYNAMIC_STOCK_NAMES.get(ticker, ""))
             stock_label = f"<code>{ticker}</code>(<i>{name_zh}</i>)" if name_zh else f"<code>{ticker}</code>"
 
-            # 策略一：30分K & 60分K 共振
+            # 策略一
             if check_strat1_resonance(df_m30, df_m60):
                 strat1_matches.append(stock_label)
                 
-            # 策略二：60分K & 日K 共振
+            # 策略二
             if check_strat2_resonance(df_m60, df_d):
                 strat2_matches.append(stock_label)
 
-            # 策略三：日K & 週K 共振
+            # 策略三
             if check_strat3_resonance(df_d, df_w):
                 strat3_matches.append(stock_label)
 
-            # 策略四：帶量突破
+            # 策略四
             vol_breakout_check = check_volume_breakout(df_d)
             if vol_breakout_check:
                 _, vol_ratio = vol_breakout_check
                 strat4_matches.append(f"{stock_label}[量比:{vol_ratio:.1f}倍]")
 
-            # 策略五：極限超賣爆量
+            # 策略五
             if check_extreme_drop_volume_up(df_d):
                 strat5_matches.append(stock_label)
 
-            # 策略六：全週期同步糾結
+            # 策略六
             if check_multi_timeframe_tangling(df_m60, df_d, df_w):
                 strat6_matches.append(stock_label)
 
-            # 策略七：低檔爆量股
+            # 策略七
             low_vol_check = check_low_position_volume_surge(df_d)
             if low_vol_check:
                 _, pos_val, vol_r = low_vol_check
                 strat7_matches.append(f"{stock_label}[位階:{pos_val}%|量比:{vol_r}倍]")
 
-        except KeyError:
-            continue
         except Exception as e:
-            print(f"⚠️ 處理個股 {ticker} 時發生未預期錯誤: {e}")
+            print(f"⚠️ 處理個股 {ticker} 時發生異常: {e}")
             continue
 
-    # 📝 建立熱門標的 7 大策略美化報告
+    # 📝 建立發送文字報告
     tw_msg = f"🔥 <b>【台股熱門排行 Top 100 多策略精選】</b>\n⏰ 時間: {tw_time_str}\n"
     tw_msg += "───────────────────\n\n"
     
