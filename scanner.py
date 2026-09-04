@@ -129,15 +129,6 @@ def check_macd_up_and_kd_gold(df_single):
     except Exception:
         return False
 
-def check_strat1_resonance(df_30m, df_60m):
-    return check_macd_up_and_kd_gold(df_30m) and check_macd_up_and_kd_gold(df_60m)
-
-def check_strat2_resonance(df_60m, df_daily):
-    return check_macd_up_and_kd_gold(df_60m) and check_macd_up_and_kd_gold(df_daily)
-
-def check_strat3_resonance(df_daily, df_weekly):
-    return check_macd_up_and_kd_gold(df_daily) and check_macd_up_and_kd_gold(df_weekly)
-
 def check_volume_breakout(df_daily):
     """ 策略四：關鍵均線多頭突破 × 量能倍增 (帶量突破) """
     try:
@@ -192,26 +183,8 @@ def check_extreme_drop_volume_up(df_daily):
         pass
     return False
 
-def check_multi_timeframe_tangling(df_60m, df_daily, df_weekly):
-    """ 策略六：時/日/週 全週期同步糾結 (不限排列) """
-    try:
-        c_60m = df_60m['Close'].squeeze().astype(float)
-        c_daily = df_daily['Close'].squeeze().astype(float)
-        c_weekly = df_weekly['Close'].squeeze().astype(float)
-        if len(c_60m) < 20 or len(c_daily) < 20 or len(c_weekly) < 20: return False
-        
-        m60_tangle = (max(c_60m.rolling(5).mean().iloc[-1], c_60m.rolling(10).mean().iloc[-1], c_60m.rolling(20).mean().iloc[-1]) - min(c_60m.rolling(5).mean().iloc[-1], c_60m.rolling(10).mean().iloc[-1], c_60m.rolling(20).mean().iloc[-1])) / c_60m.rolling(20).mean().iloc[-1]
-        d_tangle = (max(c_daily.rolling(5).mean().iloc[-1], c_daily.rolling(10).mean().iloc[-1], c_daily.rolling(20).mean().iloc[-1]) - min(c_daily.rolling(5).mean().iloc[-1], c_daily.rolling(10).mean().iloc[-1], c_daily.rolling(20).mean().iloc[-1])) / c_daily.rolling(20).mean().iloc[-1]
-        w_tangle = (max(c_weekly.rolling(5).mean().iloc[-1], c_weekly.rolling(10).mean().iloc[-1], c_weekly.rolling(20).mean().iloc[-1]) - min(c_weekly.rolling(5).mean().iloc[-1], c_weekly.rolling(10).mean().iloc[-1], c_weekly.rolling(20).mean().iloc[-1])) / c_weekly.rolling(20).mean().iloc[-1]
-        
-        if m60_tangle < 0.025 and d_tangle < 0.03 and w_tangle < 0.035 and c_daily.iloc[-1] > c_daily.rolling(20).mean().iloc[-1]:
-            return True
-    except Exception:
-        pass
-    return False
-
 def check_low_position_volume_surge(df_daily):
-    """ 策略七：低檔爆量股 (半年位階 ≤ 30% × 成交量 ≥ 2.5倍5日均量 × 紅K) """
+    """ 策略六（原策略七）：低檔爆量股 (半年位階 ≤ 30% × 成交量 ≥ 2.5倍5日均量 × 紅K) """
     try:
         if df_daily.empty or len(df_daily) < 120: return False
         
@@ -311,11 +284,10 @@ if __name__ == "__main__":
 
     print(f"⏳ 批次下載熱門標的的多週期 K 線數據 (共 {len(popular_scan_pool)} 檔)...")
     full_df_daily = yf.download(popular_scan_pool, period="1y", interval="1d", progress=False, auto_adjust=True)
-    full_df_30m = yf.download(popular_scan_pool, period="1mo", interval="30m", progress=False, auto_adjust=True)
     full_df_60m = yf.download(popular_scan_pool, period="1mo", interval="60m", progress=False, auto_adjust=True)
     full_df_weekly = yf.download(popular_scan_pool, period="2y", interval="1wk", progress=False, auto_adjust=True)
 
-    strat1_matches, strat2_matches, strat3_matches, strat4_matches, strat5_matches, strat6_matches, strat7_matches = [], [], [], [], [], [], []
+    strat1_matches, strat2_matches, strat3_matches, strat4_matches, strat5_matches, strat6_matches = [], [], [], [], [], []
 
     print("⏳ 記憶體內多維策略流檢測中...")
     for ticker in popular_scan_pool:
@@ -330,47 +302,49 @@ if __name__ == "__main__":
                 return full_df
 
             df_d = get_ticker_df(full_df_daily, ticker)
-            df_m30 = get_ticker_df(full_df_30m, ticker)
             df_m60 = get_ticker_df(full_df_60m, ticker)
             df_w = get_ticker_df(full_df_weekly, ticker)
 
-            if df_d.empty or df_m30.empty or df_m60.empty or df_w.empty: 
+            if df_d.empty or df_m60.empty or df_w.empty: 
                 continue
 
+            # 擷取最新價格與名稱
+            raw_code = ticker.replace(".TW", "")
             name_zh = html.escape(DYNAMIC_STOCK_NAMES.get(ticker, ""))
-            stock_label = f"<code>{ticker}</code>(<i>{name_zh}</i>)" if name_zh else f"<code>{ticker}</code>"
+            
+            latest_price = df_d['Close'].squeeze().iloc[-1]
+            price_str = f"${latest_price:.2f}".rstrip('0').rstrip('.') # 格式化價格顯示
+            
+            # 格式：股票代號+中文名稱+價格
+            stock_label = f"<code>{raw_code}</code>({name_zh}) {price_str}" if name_zh else f"<code>{raw_code}</code> {price_str}"
 
-            # 策略一
-            if check_strat1_resonance(df_m30, df_m60):
+            # 策略一：60分K (MACD 往0軸向上 + KD金叉)
+            if check_macd_up_and_kd_gold(df_m60):
                 strat1_matches.append(stock_label)
                 
-            # 策略二
-            if check_strat2_resonance(df_m60, df_d):
+            # 策略二：日K (MACD 往0軸向上 + KD金叉)
+            if check_macd_up_and_kd_gold(df_d):
                 strat2_matches.append(stock_label)
 
-            # 策略三
-            if check_strat3_resonance(df_d, df_w):
+            # 策略三：週K (MACD 往0軸向上 + KD金叉)
+            if check_macd_up_and_kd_gold(df_w):
                 strat3_matches.append(stock_label)
 
-            # 策略四
+            # 策略四：關鍵均線多頭突破 × 量能倍增 (帶量突破)
             vol_breakout_check = check_volume_breakout(df_d)
             if vol_breakout_check:
                 _, vol_ratio = vol_breakout_check
-                strat4_matches.append(f"{stock_label}[量比:{vol_ratio:.1f}倍]")
+                strat4_matches.append(f"{stock_label} [量比:{vol_ratio:.1f}倍]")
 
-            # 策略五
+            # 策略五：短線極限超賣 × 爆量紅K (恐慌止跌)
             if check_extreme_drop_volume_up(df_d):
                 strat5_matches.append(stock_label)
 
-            # 策略六
-            if check_multi_timeframe_tangling(df_m60, df_d, df_w):
-                strat6_matches.append(stock_label)
-
-            # 策略七
+            # 策略六（原策略七）：低檔爆量股 (半年位階 ≤ 30% × 成交量 ≥ 2.5倍5日均量 × 紅K)
             low_vol_check = check_low_position_volume_surge(df_d)
             if low_vol_check:
                 _, pos_val, vol_r = low_vol_check
-                strat7_matches.append(f"{stock_label}[位階:{pos_val}%|量比:{vol_r}倍]")
+                strat6_matches.append(f"{stock_label} [位階:{pos_val}%|量比:{vol_r}倍]")
 
         except Exception as e:
             print(f"⚠️ 處理個股 {ticker} 時發生異常: {e}")
@@ -380,13 +354,13 @@ if __name__ == "__main__":
     tw_msg = f"🔥 <b>【台股熱門排行 Top 100 多策略精選】</b>\n⏰ 時間: {tw_time_str}\n"
     tw_msg += "───────────────────\n\n"
     
-    tw_msg += "📈 <b>【策略一】30分K & 60分K 共振 (MACD 往0軸向上 + KD金叉)</b>\n"
+    tw_msg += "📈 <b>【策略一】60分K (MACD 往0軸向上 + KD金叉)</b>\n"
     tw_msg += "↳ " + (", ".join(strat1_matches) if strat1_matches else "熱門標的中無符合標的。 💤") + "\n\n"
 
-    tw_msg += "📈 <b>【策略二】60分K & 日K 共振 (MACD 往0軸向上 + KD金叉)</b>\n"
+    tw_msg += "📈 <b>【策略二】日K (MACD 往0軸向上 + KD金叉)</b>\n"
     tw_msg += "↳ " + (", ".join(strat2_matches) if strat2_matches else "熱門標的中無符合標的。 💤") + "\n\n"
 
-    tw_msg += "📈 <b>【策略三】日K & 週K 共振 (MACD 往0軸向上 + KD金叉)</b>\n"
+    tw_msg += "📈 <b>【策略三】週K (MACD 往0軸向上 + KD金叉)</b>\n"
     tw_msg += "↳ " + (", ".join(strat3_matches) if strat3_matches else "熱門標的中無符合標的。 💤") + "\n\n"
 
     tw_msg += "⚡ <b>【策略四】關鍵均線多頭突破 × 量能倍增 (帶量突破)</b>\n"
@@ -395,11 +369,8 @@ if __name__ == "__main__":
     tw_msg += "🔥 <b>【策略五】短線極限超賣 × 爆量紅K (恐慌止跌)</b>\n"
     tw_msg += "↳ " + (", ".join(strat5_matches) if strat5_matches else "熱門標的中無符合標的。 💤") + "\n\n"
 
-    tw_msg += "💎 <b>【策略六】時/日/週 全週期同步糾結 (不限排列)</b>\n"
-    tw_msg += "↳ " + (", ".join(strat6_matches) if strat6_matches else "熱門標的中無符合標的。 💤") + "\n\n"
-
-    tw_msg += "💥 <b>【策略七】低檔爆量股 (半年位階 ≤ 30% × 成交量 ≥ 2.5倍5日均量 × 紅K)</b>\n"
-    tw_msg += "↳ " + (", ".join(strat7_matches) if strat7_matches else "熱門標的中無符合標的。 💤") + "\n"
+    tw_msg += "💥 <b>【策略六】低檔爆量股 (半年位階 ≤ 30% × 成交量 ≥ 2.5倍5日均量 × 紅K)</b>\n"
+    tw_msg += "↳ " + (", ".join(strat6_matches) if strat6_matches else "熱門標的中無符合標的。 💤") + "\n"
 
     send_telegram_message(tw_msg)
     print("✅ 熱門排行多策略綜合報告發送完畢！")
