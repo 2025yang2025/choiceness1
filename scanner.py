@@ -184,7 +184,7 @@ def check_extreme_drop_volume_up(df_daily):
     return False
 
 def check_low_position_volume_surge(df_daily):
-    """ 策略六（原策略七）：低檔爆量股 (半年位階 ≤ 30% × 成交量 ≥ 2.5倍5日均量 × 紅K) """
+    """ 策略六：低檔爆量股 (半年位階 ≤ 30% × 成交量 ≥ 2.5倍5日均量 × 紅K) """
     try:
         if df_daily.empty or len(df_daily) < 120: return False
         
@@ -309,14 +309,12 @@ if __name__ == "__main__":
                 continue
 
             # 擷取最新價格與名稱
-            raw_code = ticker.replace(".TW", "")
             name_zh = html.escape(DYNAMIC_STOCK_NAMES.get(ticker, ""))
-            
             latest_price = df_d['Close'].squeeze().iloc[-1]
-            price_str = f"${latest_price:.2f}".rstrip('0').rstrip('.') # 格式化價格顯示
+            price_str = f"{latest_price:.2f}".rstrip('0').rstrip('.') # 格式化價格
             
-            # 格式：股票代號+中文名稱+價格
-            stock_label = f"<code>{raw_code}</code>({name_zh}) {price_str}" if name_zh else f"<code>{raw_code}</code> {price_str}"
+            # 依需求設定指定格式：2305.TW(全友)[30.9元]
+            stock_label = f"<code>{ticker}</code>({name_zh})[{price_str}元]" if name_zh else f"<code>{ticker}</code>[{price_str}元]"
 
             # 策略一：60分K (MACD 往0軸向上 + KD金叉)
             if check_macd_up_and_kd_gold(df_m60):
@@ -334,7 +332,7 @@ if __name__ == "__main__":
             vol_breakout_check = check_volume_breakout(df_d)
             if vol_breakout_check:
                 _, vol_ratio = vol_breakout_check
-                strat4_matches.append(f"{stock_label} [量比:{vol_ratio:.1f}倍]")
+                strat4_matches.append(f"{stock_label}[量比:{vol_ratio:.1f}倍]")
 
             # 策略五：短線極限超賣 × 爆量紅K (恐慌止跌)
             if check_extreme_drop_volume_up(df_d):
@@ -344,7 +342,7 @@ if __name__ == "__main__":
             low_vol_check = check_low_position_volume_surge(df_d)
             if low_vol_check:
                 _, pos_val, vol_r = low_vol_check
-                strat6_matches.append(f"{stock_label} [位階:{pos_val}%|量比:{vol_r}倍]")
+                strat6_matches.append(f"{stock_label}[位階:{pos_val}%|量比:{vol_r}倍]")
 
         except Exception as e:
             print(f"⚠️ 處理個股 {ticker} 時發生異常: {e}")
